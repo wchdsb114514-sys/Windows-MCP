@@ -184,7 +184,7 @@ def _scoped_state(window_name: str):
                     value = getattr(element, attribute)
                 except Exception:
                     return default
-                return default if value is None else default
+                return default if value is None else value
 
             rect = read("CurrentBoundingRectangle")
             if rect is None:
