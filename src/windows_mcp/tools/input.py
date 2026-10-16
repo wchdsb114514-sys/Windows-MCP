@@ -8,6 +8,7 @@ from collections.abc import Callable, Iterator
 from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
+from windows_mcp.desktop.credential_guard import get_guard as _get_guard
 from windows_mcp.desktop.utils import as_bool as _as_bool
 from windows_mcp.infrastructure import with_analytics
 from fastmcp import Context
@@ -217,6 +218,7 @@ def register(
     *,
     get_desktop: Callable[[], Any],
     get_analytics: Callable[[], Any],
+    get_guard: Callable[[], Any] = _get_guard,
 ) -> None:
     @mcp.tool(
         name="Click",
@@ -251,6 +253,7 @@ def register(
         if len(loc) != 2:
             raise ValueError("Location must be a list of exactly 2 integers [x, y]")
         x, y = loc[0], loc[1]
+        get_guard().check_input(x, y, tool="Click", state=desktop.desktop_state)
         desktop.click(loc=loc, button=button, clicks=clicks)
         num_clicks = {0: "Hover", 1: "Single", 2: "Double"}
         return f"{num_clicks.get(clicks)} {button} clicked at ({x},{y})."
@@ -287,6 +290,7 @@ def register(
         if len(loc) != 2:
             raise ValueError("Location must be a list of exactly 2 integers [x, y]")
         x, y = loc[0], loc[1]
+        get_guard().check_input(x, y, tool="Type", state=desktop.desktop_state)
         desktop.type(
             loc=loc,
             text=text,
@@ -322,6 +326,8 @@ def register(
             loc = _resolve_label(desktop, label)
         if loc and len(loc) != 2:
             raise ValueError("Location must be a list of exactly 2 integers [x, y]")
+        if loc:
+            get_guard().check_input(loc[0], loc[1], tool="Scroll", state=desktop.desktop_state)
         response = desktop.scroll(loc, type, direction, wheel_times)
         if response:
             return response
@@ -385,6 +391,10 @@ def register(
             if from_loc is not None:
                 from_loc = _as_point(from_loc, "from_loc")
         x, y = loc[0], loc[1]
+        guard = get_guard()
+        guard.check_input(x, y, tool="Move", state=desktop.desktop_state)
+        if from_loc is not None:
+            guard.check_input(from_loc[0], from_loc[1], tool="Move", state=desktop.desktop_state)
         if drag:
             result = desktop.drag(
                 loc,
@@ -416,7 +426,9 @@ def register(
     )
     @with_analytics(get_analytics(), "Shortcut-Tool")
     def shortcut_tool(shortcut: str, ctx: Context = None):
-        get_desktop().shortcut(shortcut)
+        desktop = get_desktop()
+        get_guard().check_foreground(tool="Shortcut", state=desktop.desktop_state)
+        desktop.shortcut(shortcut)
         return f"Pressed {shortcut}."
 
     @mcp.tool(

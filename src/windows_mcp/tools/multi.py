@@ -3,6 +3,7 @@
 import json
 
 from mcp.types import ToolAnnotations
+from windows_mcp.desktop.credential_guard import get_guard as _get_guard
 from windows_mcp.desktop.utils import as_bool as _as_bool
 from windows_mcp.infrastructure import with_analytics
 from fastmcp import Context
@@ -15,7 +16,7 @@ def _as_loc(value: list | str | None) -> list | None:
     return json.loads(value)
 
 
-def register(mcp, *, get_desktop, get_analytics):
+def register(mcp, *, get_desktop, get_analytics, get_guard=_get_guard):
     @mcp.tool(
         name="MultiSelect",
         description="Selects multiple items such as files, folders, or checkboxes if press_ctrl=True, or performs multiple clicks if False. Pass locs (list of coordinates) or labels (list of UI element labels/ids).",
@@ -50,6 +51,9 @@ def register(mcp, *, get_desktop, get_analytics):
                 raise ValueError(f"Failed to resolve labels {labels}: {e}")
 
         press_ctrl = _as_bool(press_ctrl, "press_ctrl")
+        guard = get_guard()
+        for loc in locs:
+            guard.check_input(loc[0], loc[1], tool="MultiSelect", state=desktop.desktop_state)
         desktop.multi_select(press_ctrl, locs)
         elements_str = "\n".join([f"({loc[0]},{loc[1]})" for loc in locs])
         return f"Multi-selected elements at:\n{elements_str}"
@@ -99,6 +103,11 @@ def register(mcp, *, get_desktop, get_analytics):
             except Exception as e:
                 raise ValueError(f"Failed to process labels: {e}")
 
+        # Whole batch is judged before a single key is pressed: stopping halfway
+        # would leave some fields written and some not.
+        guard = get_guard()
+        for entry in locs:
+            guard.check_input(entry[0], entry[1], tool="MultiEdit", state=desktop.desktop_state)
         desktop.multi_edit(locs)
         elements_str = ", ".join([f"({e[0]},{e[1]}) with text '{e[2]}'" for e in locs])
         return f"Multi-edited elements at: {elements_str}"
