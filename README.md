@@ -472,7 +472,7 @@ Restricts connections to specified CIDR ranges. Blocks private/loopback IPs by d
 
 ### CORS Origins
 
-By default, **no CORS headers are emitted**. Browsers block cross-origin requests via their own Same-Origin Policy, which means arbitrary websites cannot reach the MCP control plane even if the server is on `localhost`. Host-header validation (DNS rebinding protection) is also applied automatically based on the bind address.
+By default, **no CORS headers are emitted**. Browsers block cross-origin requests via their own Same-Origin Policy, which means arbitrary websites cannot reach the MCP control plane even if the server is on `localhost`.
 
 If you need a browser-based MCP client to reach the server, opt in with an explicit origin allowlist:
 
@@ -676,6 +676,91 @@ For contributors: tool categories and the few mode-specific exceptions live in
 `src/windows_mcp/tools/control_policy.py`. Update that table when adding tools or modes;
 registration coverage tests detect omissions. Unknown extensions conservatively
 use the gate. Keep policy decisions out of individual tool implementations.
+
+### Verifying that an action worked (`expect`)
+
+`Click`, `Type`, `Scroll`, `Move`, `Shortcut`, `MultiSelect` and `MultiEdit` accept an
+optional `expect`, spelled exactly the way `WaitFor` spells a condition:
+
+```json
+{"condition": "text_exists", "text": "Saved", "window_name": "Invoice", "timeout": 3}
+```
+
+The tool acts, then re-reads the UI. There are three results, because two of them
+are not the same claim:
+
+| Result | Meaning |
+|---|---|
+| `… Verified in 0.4s over 2 check(s): …` | the condition was false before the action and true after it |
+| `UNPROVEN: …` | the action ran and the condition holds, **but it already held before** — it evidences nothing about this action |
+| raises `ActionUnverified` | the action ran and the effect never appeared |
+
+The third case names the action as performed on purpose. The tool cannot know
+nothing happened, only that the expected change is missing, and a caller that
+"just retries" may submit or delete a second time.
+
+Without `expect` the reply is unchanged, byte for byte, so nothing that exists
+today pays for this or breaks.
+
+Where the evidence comes from matters: `get_state` re-captures the entire
+desktop, measured at **9.6–16.1 s** on a workstation with a text-heavy window
+open, which is longer than any sane settle budget — the poll would degenerate
+into one check and the app could change in the blind gap, and the check also
+inherits the 500-element capture cap, so an element can read as "absent" merely
+because a neighbouring window consumed the budget. Supplying `window_name`
+scopes the sample to that window instead: measured **44 ms**, about 200–350×
+cheaper, so the loop actually polls.
+
+### Credential gate (local patch)
+
+The ownership gate above answers *is the human idle?* — not *what is being typed,
+and where*. This server additionally refuses credential-bound input, in
+`src/windows_mcp/desktop/credential_guard.py`:
+
+| Rule | Blocks | Applies to |
+|---|---|---|
+| Element under the point reports UIA `IsPassword` | typing | `Type`, `MultiEdit` |
+| Focused element reports UIA `IsPassword` | keystrokes and paste | `Shortcut` |
+| Window title reads like a credential prompt | typing | `Type`, `MultiEdit` (browsers exempt — a page titled 登录 is the ordinary web; their fields still carry `IsPassword`) |
+| Owning process is a logon / credential-broker / vault exe | **all** input | `Click`, `Type`, `Scroll`, `Move`, `MultiSelect`, `MultiEdit`, `Shortcut` |
+
+`IsPassword` is asked of UIA for the exact point (or the focused element), with
+the snapshot's node list used only when UIA cannot answer. That order is
+measured, not stylistic: a real WinForms password box passed every interactive
+filter in the tree builder — `EditControl` in the type table, role `TEXT`,
+keyboard-focusable, `IsPassword=True` — and still never reached
+`interactive_nodes`, because the 500-element capture budget had already been
+spent on other windows' text nodes. A rule that reads only the tree therefore
+protects an application differently depending on what else the user happens to
+have open.
+
+Three-state matters here too: "could not answer" falls back, while "no" is
+believed outright, so a field that stopped hiding input is not blocked forever
+by a stale snapshot.
+
+Denylist covers `LogonUI`, `CredentialUI`, `CredentialUIBroker`, `AuthHost`,
+`ccHost` and the common vaults (`KeePass`, `KeePassXC`, `Bitwarden`, `1Password`,
+`LastPass`, `Dashlane`, `NordPass`, `RoboForm`). Refusals name the rule that fired
+and the variable that disables it, so an agent cannot read one as a generic error
+and retry.
+
+| Variable | Default | Effect |
+|---|---|---|
+| `WINDOWS_MCP_CREDENTIAL_GUARD` | on | `off` disables the whole gate |
+| `WINDOWS_MCP_ALLOW_PASSWORD_FIELDS` | refused | `1` lets `Type` write into password fields |
+| `WINDOWS_MCP_CREDENTIAL_DENY` | built-in list | extra comma-separated exe names; entries containing `*`/`?` glob |
+
+Three properties worth knowing rather than pretending away. Hit-testing claims
+per-monitor DPI awareness for the duration of one lookup, because an unaware
+process sees a virtualized desktop (125% scale on a 1920x1200 panel reports
+`SM_CXSCREEN` 1536, so a click at x=1700 would otherwise look off-screen and be
+allowed through) — and awareness is inherited from whatever launched the server,
+so it is not a constant. comtypes marshals `POINT` by identity, not layout: a
+hand-rolled structure with the same fields raises `expected POINT instance
+instead of _POINT`, which only showed up against the live screen because every
+unit test injected the probe. And when a window genuinely cannot be resolved the
+gate fails **open**: refusing every click because `WindowFromPoint` shrugged
+would cost more than the risk it prevents.
 
 ### `auth` Helper
 
