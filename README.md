@@ -472,7 +472,7 @@ Restricts connections to specified CIDR ranges. Blocks private/loopback IPs by d
 
 ### CORS Origins
 
-By default, **no CORS headers are emitted**. Browsers block cross-origin requests via their own Same-Origin Policy, which means arbitrary websites cannot reach the MCP control plane even if the server is on `localhost`.
+By default, **no CORS headers are emitted**. Browsers block cross-origin requests via their own Same-Origin Policy, which means arbitrary websites cannot reach the MCP control plane even if the server is on `localhost`. Host-header validation (DNS rebinding protection) is also applied automatically based on the bind address.
 
 If you need a browser-based MCP client to reach the server, opt in with an explicit origin allowlist:
 
