@@ -9,6 +9,7 @@ from typing import Any, Literal
 
 from mcp.types import ToolAnnotations
 from windows_mcp.desktop.credential_guard import get_guard as _get_guard
+from windows_mcp.tools.verification import act_and_verify, parse_expect
 from windows_mcp.desktop.utils import as_bool as _as_bool
 from windows_mcp.infrastructure import with_analytics
 from fastmcp import Context
@@ -226,7 +227,8 @@ def register(
             "Performs mouse clicks at specified coordinates [x, y] or passing a UI element's label/id. "
             "Supports button types: 'left' for selection/activation, 'right' for context menus, 'middle'. "
             "Supports clicks: 0=hover only (no click), 1=single click (select/focus), 2=double click (open/activate). "
-            "Provide either loc or label."
+            "Provide either loc or label." +
+            " Add expect to prove the action took effect, using the same condition words as WaitFor (text_exists, active_window, element_exists, element_enabled, focused_element). The reply says Verified, says UNPROVEN when the condition already held before the action, and the call fails when the effect never appears."
         ),
         annotations=ToolAnnotations(
             title="Click",
@@ -242,6 +244,7 @@ def register(
         label: int | None = None,
         button: Literal["left", "right", "middle"] = "left",
         clicks: int = 1,
+        expect: dict | str | None = None,
         ctx: Context = None,
     ) -> str:
         desktop = get_desktop()
@@ -254,13 +257,18 @@ def register(
             raise ValueError("Location must be a list of exactly 2 integers [x, y]")
         x, y = loc[0], loc[1]
         get_guard().check_input(x, y, tool="Click", state=desktop.desktop_state)
-        desktop.click(loc=loc, button=button, clicks=clicks)
+        expectation = parse_expect(expect)
         num_clicks = {0: "Hover", 1: "Single", 2: "Double"}
-        return f"{num_clicks.get(clicks)} {button} clicked at ({x},{y})."
+
+        def perform() -> str:
+            desktop.click(loc=loc, button=button, clicks=clicks)
+            return f"{num_clicks.get(clicks)} {button} clicked at ({x},{y})."
+
+        return act_and_verify(perform, expectation, desktop=desktop, tool="Click")
 
     @mcp.tool(
         name="Type",
-        description="Types text at specified coordinates [x, y] or passing a UI element's label/id. Set clear=True to clear existing text first, False to append. Set press_enter=True to submit after typing. Set caret_position to 'start' (beginning), 'end' (end), or 'idle' (default). Provide either loc or label. clear and press_enter accept only true or false. An empty text types nothing, so combine it with clear=True to just empty a field.",
+        description="Types text at specified coordinates [x, y] or passing a UI element's label/id. Set clear=True to clear existing text first, False to append. Set press_enter=True to submit after typing. Set caret_position to 'start' (beginning), 'end' (end), or 'idle' (default). Provide either loc or label. clear and press_enter accept only true or false. An empty text types nothing, so combine it with clear=True to just empty a field. Add expect to prove the action took effect, using the same condition words as WaitFor (text_exists, active_window, element_exists, element_enabled, focused_element). The reply says Verified, says UNPROVEN when the condition already held before the action, and the call fails when the effect never appears.",
         annotations=ToolAnnotations(
             title="Type",
             readOnlyHint=False,
@@ -277,6 +285,7 @@ def register(
         clear: bool | str = False,
         caret_position: Literal["start", "idle", "end"] = "idle",
         press_enter: bool | str = False,
+        expect: dict | str | None = None,
         ctx: Context = None,
     ) -> str:
         desktop = get_desktop()
@@ -291,18 +300,23 @@ def register(
             raise ValueError("Location must be a list of exactly 2 integers [x, y]")
         x, y = loc[0], loc[1]
         get_guard().check_input(x, y, tool="Type", state=desktop.desktop_state)
-        desktop.type(
-            loc=loc,
-            text=text,
-            caret_position=caret_position,
-            clear=clear,
-            press_enter=press_enter,
-        )
-        return f"Typed {text} at ({x},{y})."
+        expectation = parse_expect(expect)
+
+        def perform() -> str:
+            desktop.type(
+                loc=loc,
+                text=text,
+                caret_position=caret_position,
+                clear=clear,
+                press_enter=press_enter,
+            )
+            return f"Typed {text} at ({x},{y})."
+
+        return act_and_verify(perform, expectation, desktop=desktop, tool="Type")
 
     @mcp.tool(
         name="Scroll",
-        description="Scrolls at coordinates [x, y], a UI element's label/id, or current mouse position if loc=None. Type: vertical (default) or horizontal. Direction: up/down for vertical, left/right for horizontal. wheel_times controls amount (1 wheel ≈ 3-5 lines). Use for navigating long content, lists, and web pages.",
+        description="Scrolls at coordinates [x, y], a UI element's label/id, or current mouse position if loc=None. Type: vertical (default) or horizontal. Direction: up/down for vertical, left/right for horizontal. wheel_times controls amount (1 wheel ≈ 3-5 lines). Use for navigating long content, lists, and web pages. Add expect to prove the action took effect, using the same condition words as WaitFor (text_exists, active_window, element_exists, element_enabled, focused_element). The reply says Verified, says UNPROVEN when the condition already held before the action, and the call fails when the effect never appears.",
         annotations=ToolAnnotations(
             title="Scroll",
             readOnlyHint=False,
@@ -318,6 +332,7 @@ def register(
         type: Literal["horizontal", "vertical"] = "vertical",
         direction: Literal["up", "down", "left", "right"] = "down",
         wheel_times: int = 1,
+        expect: dict | str | None = None,
         ctx: Context = None,
     ) -> str:
         desktop = get_desktop()
@@ -328,15 +343,20 @@ def register(
             raise ValueError("Location must be a list of exactly 2 integers [x, y]")
         if loc:
             get_guard().check_input(loc[0], loc[1], tool="Scroll", state=desktop.desktop_state)
-        response = desktop.scroll(loc, type, direction, wheel_times)
-        if response:
-            return response
-        return (
-            f"Scrolled {type} {direction} by {wheel_times} wheel times"
-            + f" at ({loc[0]},{loc[1]})."
-            if loc
-            else ""
-        )
+        expectation = parse_expect(expect)
+
+        def perform() -> str:
+            response = desktop.scroll(loc, type, direction, wheel_times)
+            if response:
+                return response
+            return (
+                f"Scrolled {type} {direction} by {wheel_times} wheel times"
+                + f" at ({loc[0]},{loc[1]})."
+                if loc
+                else ""
+            )
+
+        return act_and_verify(perform, expectation, desktop=desktop, tool="Scroll")
 
     @mcp.tool(
         name="Move",
@@ -346,7 +366,8 @@ def register(
             "to the target coordinates, or provide from_loc=[x, y] to make the drag explicit-start "
             "and atomic in one tool call. Optional duration controls bounded intermediate movement. "
             "Default (drag=False) is a simple cursor move (hover). "
-            "Provide either loc or label."
+            "Provide either loc or label." +
+            " Add expect to prove the action took effect, using the same condition words as WaitFor (text_exists, active_window, element_exists, element_enabled, focused_element). The reply says Verified, says UNPROVEN when the condition already held before the action, and the call fails when the effect never appears."
         ),
         annotations=ToolAnnotations(
             title="Move",
@@ -363,6 +384,7 @@ def register(
         drag: bool | str = False,
         from_loc: list[int] | str | None = None,
         duration: float | int | str | None = None,
+        expect: dict | str | None = None,
         ctx: Context = None,
     ) -> str:
         desktop = get_desktop()
@@ -395,27 +417,31 @@ def register(
         guard.check_input(x, y, tool="Move", state=desktop.desktop_state)
         if from_loc is not None:
             guard.check_input(from_loc[0], from_loc[1], tool="Move", state=desktop.desktop_state)
-        if drag:
-            result = desktop.drag(
-                loc,
-                from_loc=from_loc,
-                duration=duration,
-            )
-            start_x, start_y = result["start"]
-            effective_duration = result["duration"]
-            if effective_duration is None:
-                return f"Dragged from ({start_x},{start_y}) to ({x},{y})."
-            return (
-                f"Dragged from ({start_x},{start_y}) to ({x},{y}) "
-                f"over {effective_duration:.3f} seconds."
-            )
-        else:
+        expectation = parse_expect(expect)
+
+        def perform() -> str:
+            if drag:
+                result = desktop.drag(
+                    loc,
+                    from_loc=from_loc,
+                    duration=duration,
+                )
+                start_x, start_y = result["start"]
+                effective_duration = result["duration"]
+                if effective_duration is None:
+                    return f"Dragged from ({start_x},{start_y}) to ({x},{y})."
+                return (
+                    f"Dragged from ({start_x},{start_y}) to ({x},{y}) "
+                    f"over {effective_duration:.3f} seconds."
+                )
             desktop.move(loc)
             return f"Moved the mouse pointer to ({x},{y})."
 
+        return act_and_verify(perform, expectation, desktop=desktop, tool="Move")
+
     @mcp.tool(
         name="Shortcut",
-        description='Executes keyboard shortcuts using key combinations separated by +. Examples: "ctrl+c" (copy), "ctrl+v" (paste), "alt+tab" (switch apps), "win+r" (Run dialog), "win" (Start menu), "ctrl+shift+esc" (Task Manager). Use for quick actions and system commands.',
+        description='Executes keyboard shortcuts using key combinations separated by +. Examples: "ctrl+c" (copy), "ctrl+v" (paste), "alt+tab" (switch apps), "win+r" (Run dialog), "win" (Start menu), "ctrl+shift+esc" (Task Manager). Use for quick actions and system commands. Add expect to prove the action took effect, using the same condition words as WaitFor (text_exists, active_window, element_exists, element_enabled, focused_element). The reply says Verified, says UNPROVEN when the condition already held before the action, and the call fails when the effect never appears.',
         annotations=ToolAnnotations(
             title="Shortcut",
             readOnlyHint=False,
@@ -425,11 +451,16 @@ def register(
         ),
     )
     @with_analytics(get_analytics(), "Shortcut-Tool")
-    def shortcut_tool(shortcut: str, ctx: Context = None):
+    def shortcut_tool(shortcut: str, expect: dict | str | None = None, ctx: Context = None):
         desktop = get_desktop()
         get_guard().check_foreground(tool="Shortcut", state=desktop.desktop_state)
-        desktop.shortcut(shortcut)
-        return f"Pressed {shortcut}."
+        expectation = parse_expect(expect)
+
+        def perform() -> str:
+            desktop.shortcut(shortcut)
+            return f"Pressed {shortcut}."
+
+        return act_and_verify(perform, expectation, desktop=desktop, tool="Shortcut")
 
     @mcp.tool(
         name="Wait",

@@ -4,6 +4,7 @@ import json
 
 from mcp.types import ToolAnnotations
 from windows_mcp.desktop.credential_guard import get_guard as _get_guard
+from windows_mcp.tools.verification import act_and_verify, parse_expect
 from windows_mcp.desktop.utils import as_bool as _as_bool
 from windows_mcp.infrastructure import with_analytics
 from fastmcp import Context
@@ -19,7 +20,7 @@ def _as_loc(value: list | str | None) -> list | None:
 def register(mcp, *, get_desktop, get_analytics, get_guard=_get_guard):
     @mcp.tool(
         name="MultiSelect",
-        description="Selects multiple items such as files, folders, or checkboxes if press_ctrl=True, or performs multiple clicks if False. Pass locs (list of coordinates) or labels (list of UI element labels/ids).",
+        description="Selects multiple items such as files, folders, or checkboxes if press_ctrl=True, or performs multiple clicks if False. Pass locs (list of coordinates) or labels (list of UI element labels/ids). Add expect to prove the action took effect, using the same condition words as WaitFor (text_exists, active_window, element_exists, element_enabled, focused_element). The reply says Verified, says UNPROVEN when the condition already held before the action, and the call fails when the effect never appears.",
         annotations=ToolAnnotations(
             title="MultiSelect",
             readOnlyHint=False,
@@ -33,6 +34,7 @@ def register(mcp, *, get_desktop, get_analytics, get_guard=_get_guard):
         locs: list[list[int]] | str | None = None,
         labels: list[int] | str | None = None,
         press_ctrl: bool | str = True,
+        expect: dict | str | None = None,
         ctx: Context = None,
     ) -> str:
         desktop = get_desktop()
@@ -54,13 +56,18 @@ def register(mcp, *, get_desktop, get_analytics, get_guard=_get_guard):
         guard = get_guard()
         for loc in locs:
             guard.check_input(loc[0], loc[1], tool="MultiSelect", state=desktop.desktop_state)
-        desktop.multi_select(press_ctrl, locs)
-        elements_str = "\n".join([f"({loc[0]},{loc[1]})" for loc in locs])
-        return f"Multi-selected elements at:\n{elements_str}"
+        expectation = parse_expect(expect)
+
+        def perform() -> str:
+            desktop.multi_select(press_ctrl, locs)
+            elements_str = "\n".join([f"({loc[0]},{loc[1]})" for loc in locs])
+            return f"Multi-selected elements at:\n{elements_str}"
+
+        return act_and_verify(perform, expectation, desktop=desktop, tool="MultiSelect")
 
     @mcp.tool(
         name="MultiEdit",
-        description="Enters text into multiple input fields at specified coordinates locs=[[x,y,text], ...] or using labels=[[label,text], ...]. Provide either locs or labels.",
+        description="Enters text into multiple input fields at specified coordinates locs=[[x,y,text], ...] or using labels=[[label,text], ...]. Provide either locs or labels. Add expect to prove the action took effect, using the same condition words as WaitFor (text_exists, active_window, element_exists, element_enabled, focused_element). The reply says Verified, says UNPROVEN when the condition already held before the action, and the call fails when the effect never appears.",
         annotations=ToolAnnotations(
             title="MultiEdit",
             readOnlyHint=False,
@@ -73,6 +80,7 @@ def register(mcp, *, get_desktop, get_analytics, get_guard=_get_guard):
     def multi_edit_tool(
         locs: list[list] | str | None = None,
         labels: list[list] | str | None = None,
+        expect: dict | str | None = None,
         ctx: Context = None,
     ) -> str:
         desktop = get_desktop()
@@ -108,6 +116,11 @@ def register(mcp, *, get_desktop, get_analytics, get_guard=_get_guard):
         guard = get_guard()
         for entry in locs:
             guard.check_input(entry[0], entry[1], tool="MultiEdit", state=desktop.desktop_state)
-        desktop.multi_edit(locs)
-        elements_str = ", ".join([f"({e[0]},{e[1]}) with text '{e[2]}'" for e in locs])
-        return f"Multi-edited elements at: {elements_str}"
+        expectation = parse_expect(expect)
+
+        def perform() -> str:
+            desktop.multi_edit(locs)
+            elements_str = ", ".join([f"({e[0]},{e[1]}) with text '{e[2]}'" for e in locs])
+            return f"Multi-edited elements at: {elements_str}"
+
+        return act_and_verify(perform, expectation, desktop=desktop, tool="MultiEdit")
